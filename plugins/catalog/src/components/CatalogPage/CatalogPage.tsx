@@ -14,30 +14,22 @@
  * limitations under the License.
  */
 
-import {
-  configApiRef,
-  Content,
-  ContentHeader,
-  errorApiRef,
-  identityApiRef,
-  SupportButton,
-  useApi,
-} from '@backstage/core';
+import { Content, ContentHeader, SupportButton } from '@backstage/core';
 import { rootRoute as scaffolderRootRoute } from '@backstage/plugin-scaffolder';
 import { Button, makeStyles } from '@material-ui/core';
-import SettingsIcon from '@material-ui/icons/Settings';
-import StarIcon from '@material-ui/icons/Star';
-import React, { useCallback, useMemo, useState } from 'react';
+import React from 'react';
+import { useForm } from 'react-hook-form';
 import { Link as RouterLink } from 'react-router-dom';
-import { EntityFilterGroupsProvider, useFilteredEntities } from '../../filter';
-import { useStarredEntities } from '../../hooks/useStarredEntities';
-import { catalogApiRef } from '../../plugin';
-import { ButtonGroup, CatalogFilter } from '../CatalogFilter/CatalogFilter';
+import { EntityFilterGroupsProvider } from '../../filter';
 import { CatalogTable } from '../CatalogTable/CatalogTable';
-import { ResultsFilter } from '../ResultsFilter/ResultsFilter';
+import { AddExampleEntitiesButton } from './AddExampleEntitiesButton';
 import CatalogLayout from './CatalogLayout';
-import { CatalogTabs, LabeledComponentType } from './CatalogTabs';
+import { useDefaultFilterValuesFromLocation } from './hooks/useDefaultFilterValuesFromLocation';
+import { useFilterSets } from './hooks/useFilterOptions';
+import { useFilteredEntities } from './hooks/useFilteredEntities';
+import { useSetLocationFromFilterValues } from './hooks/useSetLocationFromFilterValues';
 import { WelcomeBanner } from './WelcomeBanner';
+import { KindPicker } from './pickers/KindPicker';
 
 const useStyles = makeStyles(theme => ({
   contentWrapper: {
@@ -53,110 +45,18 @@ const useStyles = makeStyles(theme => ({
 
 const CatalogPageContents = () => {
   const styles = useStyles();
-  const {
-    loading,
-    error,
-    reload,
-    matchingEntities,
-    availableTags,
-    isCatalogEmpty,
-  } = useFilteredEntities();
-  const configApi = useApi(configApiRef);
-  const catalogApi = useApi(catalogApiRef);
-  const errorApi = useApi(errorApiRef);
-  const { isStarredEntity } = useStarredEntities();
-  const userId = useApi(identityApiRef).getUserId();
-  const [selectedTab, setSelectedTab] = useState<string>();
-  const [selectedSidebarItem, setSelectedSidebarItem] = useState<string>();
-  const orgName = configApi.getOptionalString('organization.name') ?? 'Company';
-
-  const addMockData = useCallback(async () => {
-    try {
-      const promises: Promise<unknown>[] = [];
-      const root = configApi.getConfig('catalog.exampleEntityLocations');
-      for (const type of root.keys()) {
-        for (const target of root.getStringArray(type)) {
-          promises.push(catalogApi.addLocation({ target }));
-        }
-      }
-      await Promise.all(promises);
-      await reload();
-    } catch (err) {
-      errorApi.post(err);
-    }
-  }, [catalogApi, configApi, errorApi, reload]);
-
-  const tabs = useMemo<LabeledComponentType[]>(
-    () => [
-      {
-        id: 'service',
-        label: 'Services',
-      },
-      {
-        id: 'website',
-        label: 'Websites',
-      },
-      {
-        id: 'library',
-        label: 'Libraries',
-      },
-      {
-        id: 'documentation',
-        label: 'Documentation',
-      },
-      {
-        id: 'other',
-        label: 'Other',
-      },
-    ],
-    [],
-  );
-
-  const filterGroups = useMemo<ButtonGroup[]>(
-    () => [
-      {
-        name: 'Personal',
-        items: [
-          {
-            id: 'owned',
-            label: 'Owned',
-            icon: SettingsIcon,
-            filterFn: entity => entity.spec?.owner === userId,
-          },
-          {
-            id: 'starred',
-            label: 'Starred',
-            icon: StarIcon,
-            filterFn: isStarredEntity,
-          },
-        ],
-      },
-      {
-        name: orgName,
-        items: [
-          {
-            id: 'all',
-            label: 'All',
-            filterFn: () => true,
-          },
-        ],
-      },
-    ],
-    [isStarredEntity, userId, orgName],
-  );
-
-  const showAddExampleEntities =
-    configApi.has('catalog.exampleEntityLocations') && isCatalogEmpty;
+  const defaultValues = useDefaultFilterValuesFromLocation();
+  const { control, watch } = useForm({ defaultValues, mode: 'onChange' });
+  const values = watch();
+  useSetLocationFromFilterValues(values);
+  const { loading, error, value: entities } = useFilteredEntities(values);
+  const filterSets = useFilterSets(values, entities);
 
   return (
     <CatalogLayout>
-      <CatalogTabs
-        tabs={tabs}
-        onChange={({ label }) => setSelectedTab(label)}
-      />
       <Content>
         <WelcomeBanner />
-        <ContentHeader title={selectedTab ?? ''}>
+        <ContentHeader title="">
           <Button
             component={RouterLink}
             variant="contained"
@@ -165,30 +65,24 @@ const CatalogPageContents = () => {
           >
             Create Component
           </Button>
-          {showAddExampleEntities && (
-            <Button
-              className={styles.buttonSpacing}
-              variant="outlined"
-              color="primary"
-              onClick={addMockData}
-            >
-              Add example components
-            </Button>
-          )}
+          <AddExampleEntitiesButton catalogIsEmpty={false} onAdded={() => {}} />
           <SupportButton>All your software catalog entities</SupportButton>
         </ContentHeader>
         <div className={styles.contentWrapper}>
           <div>
-            <CatalogFilter
-              buttonGroups={filterGroups}
-              onChange={({ label }) => setSelectedSidebarItem(label)}
-              initiallySelected="owned"
-            />
-            <ResultsFilter availableTags={availableTags} />
+            <form
+              onSubmit={e => {
+                e.preventDefault();
+                e.stopPropagation();
+                return false;
+              }}
+            >
+              <KindPicker control={control} options={filterSets.kind} />
+            </form>
           </div>
           <CatalogTable
-            titlePreamble={selectedSidebarItem ?? ''}
-            entities={matchingEntities}
+            titlePreamble="Entities"
+            entities={entities || []}
             loading={loading}
             error={error}
           />
